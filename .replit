@@ -1,0 +1,31 @@
+modules = ["nodejs-20"]
+[agent]
+expertMode = true
+
+[nix]
+channel = "stable-25_05"
+
+[[ports]]
+localPort = 3000
+externalPort = 3001
+
+[[ports]]
+localPort = 4000
+externalPort = 3000
+
+[[ports]]
+localPort = 25545
+externalPort = 80
+
+run = "npm run dev"
+
+[workflows]
+
+[[workflows.workflow]]
+name = "kho-quanao-backend"
+mode = "sequential"
+author = 42720599
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm run dev"
