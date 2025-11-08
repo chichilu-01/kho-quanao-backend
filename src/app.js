@@ -11,7 +11,9 @@ import ordersRouter from "./routes/orders.routes.js";
 
 dotenv.config();
 const app = express();
-app.use(cors());
+app.use(cors({
+  origin: "https://f5afe18c-a293-4f59-8649-cc82af0d7d46-00-1144g3c0jf i8g.sisko.replit.dev",
+}));
 app.use(express.json());
 
 // ✅ Kiểm tra kết nối DB
