@@ -1,5 +1,6 @@
 import { pool } from "../db.js";
 
+// ✅ Tạo đơn hàng mới
 export const createOrder = async (req, res) => {
   const connection = await pool.getConnection();
   try {
@@ -60,5 +61,53 @@ export const createOrder = async (req, res) => {
     res.status(500).json({ message: err.message });
   } finally {
     connection.release();
+  }
+};
+
+// ✅ Lấy danh sách đơn hàng (có ảnh sản phẩm + thông tin khách hàng)
+export const listOrders = async (req, res) => {
+  try {
+    // Lấy danh sách đơn hàng + khách
+    const [orders] = await pool.query(`
+      SELECT o.*, c.name AS customer_name, c.phone, c.address
+      FROM orders o
+      JOIN customers c ON o.customer_id = c.id
+      ORDER BY o.id DESC
+    `);
+
+    // Lấy chi tiết từng sản phẩm trong đơn
+    const [items] = await pool.query(`
+      SELECT 
+        oi.order_id,
+        oi.quantity,
+        oi.price,
+        pv.size,
+        pv.color,
+        p.name AS product_name,
+        p.sku,
+        p.cover_image
+      FROM order_items oi
+      JOIN product_variants pv ON oi.variant_id = pv.id
+      JOIN products p ON pv.product_id = p.id
+      ORDER BY oi.order_id DESC
+    `);
+
+    // Gắn items vào từng đơn hàng
+    const orderMap = {};
+    for (const order of orders) {
+      order.items = [];
+      orderMap[order.id] = order;
+    }
+
+    for (const it of items) {
+      if (orderMap[it.order_id]) {
+        orderMap[it.order_id].items.push(it);
+      }
+    }
+
+    res.json(orders);
+  } catch (err) {
+    console.error("❌ Lỗi listOrders:", err);
+    res.status(500).json({ message: err.message });
   }
 };
