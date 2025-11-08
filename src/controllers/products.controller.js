@@ -12,7 +12,7 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// ⚙️ Multer xử lý upload file tạm
+// ⚙️ Multer xử lý upload file tạm trong bộ nhớ
 const upload = multer({ storage: multer.memoryStorage() });
 
 // ✅ Middleware upload 1 ảnh (frontend gửi field name = "image")
@@ -26,67 +26,47 @@ export const createProduct = async (req, res) => {
     if (!sku || !name)
       return res.status(400).json({ message: "Thiếu SKU hoặc tên sản phẩm" });
 
-    // 🖼️ Nếu có file, upload lên Cloudinary
     let imageUrl = null;
+
+    // 🖼️ Nếu có file ảnh — upload lên Cloudinary
     if (req.file) {
-      const result = await cloudinary.uploader.upload_stream(
-        {
-          folder: "kho_quanao",
-          resource_type: "image",
-        },
-        async (error, uploadResult) => {
-          if (error) {
-            console.error("❌ Upload thất bại:", error);
-            return res.status(500).json({ message: "Lỗi upload ảnh" });
-          }
-
-          imageUrl = uploadResult.secure_url;
-
-          // 🧠 Lưu sản phẩm vào DB
-          const [resultDB] = await pool.query(
-            "INSERT INTO products (sku, name, category, cost_price, sale_price, cover_image) VALUES (?, ?, ?, ?, ?, ?)",
-            [
-              sku.trim().toUpperCase(),
-              name.trim(),
-              category || null,
-              cost_price || 0,
-              sale_price || 0,
-              imageUrl,
-            ],
-          );
-
-          res.status(201).json({
-            id: resultDB.insertId,
-            message: "Tạo sản phẩm thành công",
-            image_url: imageUrl,
-          });
-        },
-      );
-
-      // Gửi dữ liệu ảnh qua stream (vì multer dùng memoryStorage)
-      result.end(req.file.buffer);
-      return;
+      imageUrl = await new Promise((resolve, reject) => {
+        const stream = cloudinary.uploader.upload_stream(
+          {
+            folder: "kho_quanao",
+            resource_type: "image",
+          },
+          (error, result) => {
+            if (error) {
+              console.error("❌ Upload thất bại:", error);
+              return reject(error);
+            }
+            resolve(result.secure_url);
+          },
+        );
+        stream.end(req.file.buffer);
+      });
     }
 
-    // ⛔ Không có ảnh, chỉ lưu text
+    // 💾 Lưu sản phẩm vào DB
     const [resultDB] = await pool.query(
-      "INSERT INTO products (sku, name, category, cost_price, sale_price, cover_image) VALUES (?, ?, ?, ?, ?, ?)",
+      `INSERT INTO products (sku, name, category, cost_price, sale_price, cover_image)
+       VALUES (?, ?, ?, ?, ?, ?)`,
       [
         sku.trim().toUpperCase(),
         name.trim(),
         category || null,
         cost_price || 0,
         sale_price || 0,
-        null,
+        imageUrl,
       ],
     );
 
-    res
-      .status(201)
-      .json({
-        id: resultDB.insertId,
-        message: "Tạo sản phẩm thành công (không có ảnh)",
-      });
+    res.status(201).json({
+      id: resultDB.insertId,
+      message: "Tạo sản phẩm thành công",
+      image_url: imageUrl,
+    });
   } catch (err) {
     console.error("❌ Lỗi createProduct:", err);
     if (err.code === "ER_DUP_ENTRY") {
