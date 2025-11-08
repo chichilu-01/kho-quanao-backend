@@ -76,7 +76,7 @@ export const getCustomerDetail = async (req, res) => {
       ORDER BY oi.order_id DESC
     `);
 
-    // 4️⃣ Gắn items vào đơn hàng
+    // 4️⃣ Gắn items vào từng đơn
     const orderMap = {};
     for (const o of orders) {
       o.items = [];
@@ -86,7 +86,7 @@ export const getCustomerDetail = async (req, res) => {
       if (orderMap[it.order_id]) orderMap[it.order_id].items.push(it);
     }
 
-    // 5️⃣ Tính tổng đơn và tổng chi tiêu
+    // 5️⃣ Tính tổng số đơn và tổng chi tiêu
     const totalOrders = orders.length;
     const totalSpent = orders.reduce((sum, o) => sum + Number(o.total || 0), 0);
 
@@ -94,10 +94,56 @@ export const getCustomerDetail = async (req, res) => {
     customer.total_orders = totalOrders;
     customer.total_spent = totalSpent;
 
-    // ✅ Gửi dữ liệu về client
+    // ✅ Gửi dữ liệu về frontend
     res.json(customer);
   } catch (err) {
     console.error("❌ getCustomerDetail error:", err);
+    res.status(500).json({ message: err.message });
+  }
+};
+
+// ✅ Cập nhật thông tin khách hàng
+export const updateCustomer = async (req, res) => {
+  const { id } = req.params;
+  const { name, phone, address, facebook_url, notes } = req.body;
+  try {
+    const [result] = await pool.query(
+      `UPDATE customers 
+       SET name = ?, phone = ?, address = ?, facebook_url = ?, notes = ? 
+       WHERE id = ?`,
+      [
+        name,
+        phone || null,
+        address || null,
+        facebook_url || null,
+        notes || null,
+        id,
+      ],
+    );
+
+    if (result.affectedRows === 0)
+      return res.status(404).json({ message: "Không tìm thấy khách hàng" });
+
+    res.json({ message: "Cập nhật thông tin thành công" });
+  } catch (err) {
+    console.error("❌ updateCustomer error:", err);
+    res.status(500).json({ message: err.message });
+  }
+};
+
+// ✅ Xoá khách hàng
+export const deleteCustomer = async (req, res) => {
+  const { id } = req.params;
+  try {
+    const [result] = await pool.query(`DELETE FROM customers WHERE id = ?`, [
+      id,
+    ]);
+    if (result.affectedRows === 0)
+      return res.status(404).json({ message: "Không tìm thấy khách hàng" });
+
+    res.json({ message: "Đã xoá khách hàng thành công" });
+  } catch (err) {
+    console.error("❌ deleteCustomer error:", err);
     res.status(500).json({ message: err.message });
   }
 };
