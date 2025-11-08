@@ -38,11 +38,12 @@ export const listCustomers = async (req, res) => {
   }
 };
 
-// ✅ Lấy thông tin + lịch sử mua hàng của 1 khách
+// ✅ Lấy thông tin chi tiết + lịch sử mua hàng + tổng chi tiêu
 export const getCustomerDetail = async (req, res) => {
   const { id } = req.params;
+
   try {
-    // 1️⃣ Lấy thông tin khách
+    // 1️⃣ Lấy thông tin khách hàng
     const [customers] = await pool.query(
       `SELECT * FROM customers WHERE id = ? LIMIT 1`,
       [id],
@@ -61,7 +62,7 @@ export const getCustomerDetail = async (req, res) => {
       [id],
     );
 
-    // 3️⃣ Lấy toàn bộ sản phẩm trong các đơn hàng
+    // 3️⃣ Lấy chi tiết sản phẩm của các đơn
     const [items] = await pool.query(`
       SELECT 
         oi.order_id,
@@ -75,20 +76,25 @@ export const getCustomerDetail = async (req, res) => {
       ORDER BY oi.order_id DESC
     `);
 
-    // 4️⃣ Gắn items vào đơn hàng tương ứng
+    // 4️⃣ Gắn items vào đơn hàng
     const orderMap = {};
     for (const o of orders) {
       o.items = [];
       orderMap[o.id] = o;
     }
     for (const it of items) {
-      if (orderMap[it.order_id]) {
-        orderMap[it.order_id].items.push(it);
-      }
+      if (orderMap[it.order_id]) orderMap[it.order_id].items.push(it);
     }
 
-    customer.orders = orders;
+    // 5️⃣ Tính tổng đơn và tổng chi tiêu
+    const totalOrders = orders.length;
+    const totalSpent = orders.reduce((sum, o) => sum + Number(o.total || 0), 0);
 
+    customer.orders = orders;
+    customer.total_orders = totalOrders;
+    customer.total_spent = totalSpent;
+
+    // ✅ Gửi dữ liệu về client
     res.json(customer);
   } catch (err) {
     console.error("❌ getCustomerDetail error:", err);
