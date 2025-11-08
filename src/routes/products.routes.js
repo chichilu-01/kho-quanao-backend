@@ -1,13 +1,17 @@
-import { Router } from "express";
+import express from "express";
 import {
   createProduct,
   listProducts,
   findByCode,
+  uploadImage,
 } from "../controllers/products.controller.js";
-const r = Router();
 
-r.get("/", listProducts);
-r.post("/", createProduct);
-r.get("/find-by-code", findByCode);
+const router = express.Router();
 
-export default r;
+router.get("/", listProducts);
+router.get("/search", findByCode);
+
+// 🆕 Route POST hỗ trợ upload ảnh
+router.post("/", uploadImage, createProduct);
+
+export default router;
