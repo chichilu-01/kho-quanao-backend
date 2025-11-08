@@ -13,10 +13,15 @@ dotenv.config();
 const app = express();
 app.use(
   cors({
-    origin:
-      "https://f5afe18c-a293-4f59-8649-cc82af0d7d46-00-1144g3c0jfi8g.sisko.replit.dev/",
+    origin: [
+      "https://kho-quanao-chichilu.vercel.app", // ✅ Cho phép frontend Vercel
+      "http://localhost:5173", // ✅ Cho phép khi bạn test local
+    ],
+    methods: ["GET", "POST", "PUT", "DELETE"],
+    credentials: true,
   }),
 );
+
 app.use(express.json());
 
 // ✅ Kiểm tra kết nối DB
