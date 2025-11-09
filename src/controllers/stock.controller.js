@@ -77,13 +77,33 @@ export const sellStock = async (req, res) => {
 // ✅ Xem lịch sử nhập / xuất
 export const listStockMovements = async (req, res) => {
   try {
-    const [rows] = await pool.query(
-      `SELECT sm.*, pv.size, pv.color, pv.stock, p.name AS product_name
-       FROM stock_movements sm
-       JOIN product_variants pv ON sm.variant_id = pv.id
-       JOIN products p ON pv.product_id = p.id
-       ORDER BY sm.created_at DESC`,
-    );
+    const { reason, start, end } = req.query;
+    let sql = `
+      SELECT sm.*, pv.variant_sku
+      FROM stock_movements sm
+      JOIN product_variants pv ON sm.variant_id = pv.id
+      WHERE 1=1
+    `;
+    const params = [];
+
+    if (reason && reason !== "all") {
+      sql += " AND sm.reason = ?";
+      params.push(reason);
+    }
+
+    if (start) {
+      sql += " AND sm.created_at >= ?";
+      params.push(start);
+    }
+
+    if (end) {
+      sql += " AND sm.created_at <= ?";
+      params.push(end + " 23:59:59");
+    }
+
+    sql += " ORDER BY sm.created_at DESC";
+
+    const [rows] = await pool.query(sql, params);
     res.json(rows);
   } catch (err) {
     console.error("❌ Lỗi listStockMovements:", err);
