@@ -98,29 +98,31 @@ export const createProduct = async (req, res) => {
   }
 };
 
-// ✅ Lấy danh sách sản phẩm (cộng tồn kho tổng)
+// ✅ Lấy danh sách sản phẩm (kèm tổng tồn kho từ các biến thể)
 export const listProducts = async (req, res) => {
   try {
     const { q } = req.query;
+    const params = [];
     let sql = `
       SELECT 
-        p.*, 
-        COALESCE(SUM(v.stock), 0) AS total_stock
+        p.id, p.sku, p.name, p.category, p.brand, 
+        p.cost_price, p.sale_price, p.cover_image,
+        COALESCE(SUM(v.stock), 0) AS stock
       FROM products p
       LEFT JOIN product_variants v ON v.product_id = p.id
     `;
-    const params = [];
 
     if (q) {
-      sql += " WHERE p.name LIKE ? OR p.sku LIKE ? OR p.brand LIKE ?";
-      params.push(`%${q}%`, `%${q}%`, `%${q}%`);
+      sql += " WHERE p.name LIKE ? OR p.sku LIKE ?";
+      params.push(`%${q}%`, `%${q}%`);
     }
 
     sql += " GROUP BY p.id ORDER BY p.id DESC";
+
     const [rows] = await pool.query(sql, params);
     res.json(rows);
   } catch (err) {
-    console.error("❌ listProducts error:", err);
+    console.error("❌ Lỗi listProducts:", err);
     res.status(500).json({ message: err.message });
   }
 };
