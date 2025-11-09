@@ -1,43 +1,46 @@
+// controllers/orders.controller.js
 import { pool } from "../db.js";
 
+//
 // ✅ Tạo đơn hàng mới
+//
 export const createOrder = async (req, res) => {
   const connection = await pool.getConnection();
   try {
     const { customer_id, note, items } = req.body;
 
     if (!customer_id || !items || !Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ message: "Thiếu dữ liệu đầu vào" });
+      return res
+        .status(400)
+        .json({ message: "Thiếu dữ liệu đầu vào (customer_id hoặc items)" });
     }
 
     await connection.beginTransaction();
 
     // 1️⃣ Tính tổng tiền
-    let subtotal = 0;
-    for (const item of items) {
-      subtotal += item.price * item.quantity;
-    }
+    const subtotal = items.reduce((sum, i) => sum + i.price * i.quantity, 0);
 
     // 2️⃣ Tạo đơn hàng
     const [orderResult] = await connection.query(
-      `INSERT INTO orders (customer_id, subtotal, total, note)
-       VALUES (?, ?, ?, ?)`,
+      `INSERT INTO orders (customer_id, subtotal, total, note, status, created_at)
+       VALUES (?, ?, ?, ?, 'pending', NOW())`,
       [customer_id, subtotal, subtotal, note || null],
     );
     const orderId = orderResult.insertId;
 
-    // 3️⃣ Thêm từng item vào order_items + cập nhật kho
+    // 3️⃣ Xử lý từng item: lưu vào order_items, trừ tồn kho, cập nhật sản phẩm chính
     for (const item of items) {
       const { variant_id, quantity, price } = item;
+      if (!variant_id || !quantity) throw new Error(`Thiếu dữ liệu biến thể`);
 
-      // Thêm dòng chi tiết sản phẩm
+      // 🧾 Thêm dòng chi tiết
       await connection.query(
         `INSERT INTO order_items (order_id, variant_id, quantity, price)
          VALUES (?, ?, ?, ?)`,
         [orderId, variant_id, quantity, price],
       );
 
-      // Trừ tồn kho của biến thể
+      // 🔻 Trừ tồn kho
       const [updateResult] = await connection.query(
         `UPDATE product_variants
          SET stock = stock - ?
@@ -49,14 +52,14 @@ export const createOrder = async (req, res) => {
         throw new Error(`❌ Biến thể ID ${variant_id} không đủ hàng trong kho`);
       }
 
-      // Ghi log vào stock_movements
+      // 📦 Ghi log biến động kho
       await connection.query(
-        `INSERT INTO stock_movements (variant_id, change_qty, reason, reference_id)
-         VALUES (?, ?, 'order', ?)`,
+        `INSERT INTO stock_movements (variant_id, change_qty, reason, reference_id, created_at)
+         VALUES (?, ?, 'order', ?, NOW())`,
         [variant_id, -quantity, orderId],
       );
 
-      // ✅ Cập nhật tổng tồn kho sản phẩm chính
+      // 🔁 Cập nhật tổng tồn kho sản phẩm chính
       await connection.query(
         `UPDATE products 
          SET stock = (
@@ -74,24 +77,29 @@ export const createOrder = async (req, res) => {
     }
 
     await connection.commit();
+    console.log(`✅ Đơn hàng #${orderId} đã tạo thành công`);
 
     res.status(201).json({
       id: orderId,
       message: "✅ Tạo đơn hàng thành công!",
+      total: subtotal,
     });
   } catch (err) {
     await connection.rollback();
-    console.error("❌ Lỗi createOrder:", err);
-    res.status(500).json({ message: err.message });
+    console.error("❌ Lỗi createOrder:", err.message);
+    res
+      .status(500)
+      .json({ message: err.message || "Lỗi server khi tạo đơn hàng" });
   } finally {
     connection.release();
   }
 };
 
-// ✅ Lấy danh sách đơn hàng (kèm ảnh sản phẩm + thông tin khách hàng)
-export const listOrders = async (req, res) => {
+//
+// ✅ Lấy danh sách đơn hàng (kèm khách hàng + sản phẩm)
+//
+export const listOrders = async (_req, res) => {
   try {
-    // Lấy danh sách đơn hàng + thông tin khách hàng
     const [orders] = await pool.query(`
       SELECT o.*, c.name AS customer_name, c.phone, c.address
       FROM orders o
@@ -99,7 +107,6 @@ export const listOrders = async (req, res) => {
       ORDER BY o.id DESC
     `);
 
-    // Lấy chi tiết từng sản phẩm trong đơn
     const [items] = await pool.query(`
       SELECT 
         oi.order_id,
@@ -116,39 +123,37 @@ export const listOrders = async (req, res) => {
       ORDER BY oi.order_id DESC
     `);
 
-    // Gắn items vào từng đơn hàng
-    const orderMap = {};
-    for (const order of orders) {
-      order.items = [];
-      orderMap[order.id] = order;
-    }
-
+    // Gắn sản phẩm vào từng đơn hàng
+    const map = Object.fromEntries(
+      orders.map((o) => [o.id, { ...o, items: [] }]),
+    );
     for (const it of items) {
-      if (orderMap[it.order_id]) {
-        orderMap[it.order_id].items.push(it);
-      }
+      if (map[it.order_id]) map[it.order_id].items.push(it);
     }
 
-    res.json(orders);
+    res.json(Object.values(map));
   } catch (err) {
     console.error("❌ Lỗi listOrders:", err);
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ message: "Lỗi server khi lấy danh sách đơn hàng" });
   }
 };
 
+//
 // ✅ Cập nhật trạng thái đơn hàng
+//
 export const updateOrderStatus = async (req, res) => {
   const connection = await pool.getConnection();
   try {
     const { id } = req.params;
     const { status } = req.body;
 
-    if (!["pending", "shipped", "completed", "cancelled"].includes(status)) {
+    const validStatuses = ["pending", "shipped", "completed", "cancelled"];
+    if (!validStatuses.includes(status)) {
       return res.status(400).json({ message: "Trạng thái không hợp lệ" });
     }
 
     const [result] = await connection.query(
-      "UPDATE orders SET status = ? WHERE id = ?",
+      "UPDATE orders SET status = ?, updated_at = NOW() WHERE id = ?",
       [status, id],
     );
 
@@ -156,8 +161,10 @@ export const updateOrderStatus = async (req, res) => {
       return res.status(404).json({ message: "Không tìm thấy đơn hàng" });
     }
 
+    console.log(`🔄 Cập nhật đơn #${id} => ${status}`);
+
     res.json({
-      message: `✅ Đã cập nhật trạng thái đơn hàng #${id} thành '${status}'`,
+      message: `✅ Cập nhật trạng thái đơn hàng #${id} thành '${status}'`,
     });
   } catch (err) {
     console.error("❌ updateOrderStatus:", err);

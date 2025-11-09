@@ -1,3 +1,4 @@
+// controllers/variants.controller.js
 import { pool } from "../db.js";
 
 //
@@ -37,12 +38,17 @@ export const createVariant = async (req, res) => {
 // ✅ Lấy danh sách biến thể theo product_id
 //
 export const listVariantsByProduct = async (req, res) => {
-  const { productId } = req.params;
+  // Cho phép đọc cả /by-product/:id và /:productId
+  const productId = req.params.id || req.params.productId;
+
+  if (!productId) return res.status(400).json({ message: "Thiếu ID sản phẩm" });
+
   try {
     const [rows] = await pool.query(
       "SELECT * FROM product_variants WHERE product_id = ? ORDER BY id DESC",
       [productId],
     );
+
     res.json(rows);
   } catch (err) {
     console.error("❌ listVariantsByProduct:", err);
@@ -111,7 +117,6 @@ export const reduceStock = async (req, res) => {
     return res.status(400).json({ message: "Số lượng không hợp lệ" });
 
   try {
-    // Kiểm tra tồn kho hiện tại
     const [[variant]] = await pool.query(
       "SELECT stock FROM product_variants WHERE id = ?",
       [id],

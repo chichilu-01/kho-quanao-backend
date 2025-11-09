@@ -1,3 +1,4 @@
+// routes/variants.routes.js
 import express from "express";
 import {
   createVariant,
@@ -13,7 +14,10 @@ const router = express.Router();
 // ➕ Tạo biến thể
 router.post("/", createVariant);
 
-// 📦 Lấy danh sách biến thể của sản phẩm
+// 📦 Lấy danh sách biến thể theo sản phẩm (theo đúng frontend gọi)
+router.get("/by-product/:id", listVariantsByProduct);
+
+// ⚙️ Giữ tương thích route cũ (nếu có chỗ nào gọi /variants/:productId)
 router.get("/:productId", listVariantsByProduct);
 
 // ✏️ Cập nhật biến thể
