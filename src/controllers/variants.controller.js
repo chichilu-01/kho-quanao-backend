@@ -5,7 +5,6 @@ import { pool } from "../db.js";
 //
 export const createVariant = async (req, res) => {
   const { product_id, size, color, variant_sku, stock } = req.body;
-
   if (!product_id) return res.status(400).json({ message: "Thiếu product_id" });
 
   try {
@@ -35,7 +34,7 @@ export const createVariant = async (req, res) => {
 };
 
 //
-// ✅ Lấy tất cả biến thể của 1 sản phẩm
+// ✅ Lấy danh sách biến thể theo product_id
 //
 export const listVariantsByProduct = async (req, res) => {
   const { productId } = req.params;
@@ -52,7 +51,7 @@ export const listVariantsByProduct = async (req, res) => {
 };
 
 //
-// ✅ Cập nhật thông tin biến thể
+// ✅ Cập nhật biến thể
 //
 export const updateVariant = async (req, res) => {
   const { id } = req.params;
@@ -66,9 +65,8 @@ export const updateVariant = async (req, res) => {
       [size || null, color || null, variant_sku || null, stock || 0, id],
     );
 
-    if (result.affectedRows === 0) {
+    if (result.affectedRows === 0)
       return res.status(404).json({ message: "Không tìm thấy biến thể" });
-    }
 
     res.json({ message: "✅ Cập nhật biến thể thành công" });
   } catch (err) {
@@ -92,13 +90,73 @@ export const deleteVariant = async (req, res) => {
       [id],
     );
 
-    if (result.affectedRows === 0) {
+    if (result.affectedRows === 0)
       return res.status(404).json({ message: "Không tìm thấy biến thể" });
-    }
 
     res.json({ message: "🗑️ Xoá biến thể thành công" });
   } catch (err) {
     console.error("❌ deleteVariant:", err);
     res.status(500).json({ message: "Lỗi server khi xoá biến thể" });
+  }
+};
+
+//
+// 🔻 Giảm tồn kho khi bán hàng
+//
+export const reduceStock = async (req, res) => {
+  const { id } = req.params;
+  const { quantity } = req.body;
+
+  if (!quantity || quantity <= 0)
+    return res.status(400).json({ message: "Số lượng không hợp lệ" });
+
+  try {
+    // Kiểm tra tồn kho hiện tại
+    const [[variant]] = await pool.query(
+      "SELECT stock FROM product_variants WHERE id = ?",
+      [id],
+    );
+
+    if (!variant)
+      return res.status(404).json({ message: "Không tìm thấy biến thể" });
+
+    if (variant.stock < quantity) {
+      return res.status(400).json({
+        message: `Tồn kho không đủ (hiện còn ${variant.stock})`,
+      });
+    }
+
+    await pool.query(
+      "UPDATE product_variants SET stock = stock - ? WHERE id = ?",
+      [quantity, id],
+    );
+
+    res.json({ message: `✅ Đã trừ ${quantity} sản phẩm khỏi tồn kho` });
+  } catch (err) {
+    console.error("❌ reduceStock:", err);
+    res.status(500).json({ message: "Lỗi server khi giảm tồn kho" });
+  }
+};
+
+//
+// 🔺 Cộng lại tồn kho khi huỷ đơn hàng
+//
+export const restoreStock = async (req, res) => {
+  const { id } = req.params;
+  const { quantity } = req.body;
+
+  if (!quantity || quantity <= 0)
+    return res.status(400).json({ message: "Số lượng không hợp lệ" });
+
+  try {
+    await pool.query(
+      "UPDATE product_variants SET stock = stock + ? WHERE id = ?",
+      [quantity, id],
+    );
+
+    res.json({ message: `🔁 Đã hoàn lại ${quantity} sản phẩm vào tồn kho` });
+  } catch (err) {
+    console.error("❌ restoreStock:", err);
+    res.status(500).json({ message: "Lỗi server khi hoàn lại tồn kho" });
   }
 };

@@ -4,6 +4,8 @@ import {
   listVariantsByProduct,
   updateVariant,
   deleteVariant,
+  reduceStock,
+  restoreStock,
 } from "../controllers/variants.controller.js";
 
 const router = express.Router();
@@ -19,5 +21,11 @@ router.put("/:id", updateVariant);
 
 // ❌ Xoá biến thể
 router.delete("/:id", deleteVariant);
+
+// 🔻 Giảm tồn kho sau khi bán
+router.post("/:id/reduce-stock", reduceStock);
+
+// 🔺 Cộng lại tồn kho khi huỷ đơn hàng
+router.post("/:id/restore-stock", restoreStock);
 
 export default router;
