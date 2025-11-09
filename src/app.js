@@ -1,3 +1,4 @@
+// app.js
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -11,11 +12,12 @@ import ordersRouter from "./routes/orders.routes.js";
 
 dotenv.config();
 const app = express();
+
 app.use(
   cors({
     origin: [
-      "https://kho-quanao-chichilu.vercel.app", // ✅ Cho phép frontend Vercel
-      "http://localhost:5173", // ✅ Cho phép khi bạn test local
+      "https://kho-quanao-chichilu.vercel.app", // frontend Vercel
+      "http://localhost:5173", // test local
     ],
     methods: ["GET", "POST", "PUT", "DELETE"],
     credentials: true,
@@ -40,13 +42,11 @@ app.use("/api/variants", variantsRouter);
 app.use("/api/stock", stockRouter);
 app.use("/api/customers", customersRouter);
 app.use("/api/orders", ordersRouter);
-// ✅ Route mặc định để kiểm tra nhanh
+
+// ✅ Route mặc định
 app.get("/", (req, res) => {
   res.send("Server running! Try /api/health or /api/orders");
 });
 
-// ✅ Cuối cùng mới khởi động server
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`✅ Server running on port ${PORT}`);
-});
+app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));

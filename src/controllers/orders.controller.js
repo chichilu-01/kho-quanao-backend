@@ -2,6 +2,26 @@
 import { pool } from "../db.js";
 
 //
+// 🆕 Lấy trạng thái đơn hàng
+//
+export const getOrderStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const [rows] = await pool.query(
+      "SELECT id, status FROM orders WHERE id = ?",
+      [id],
+    );
+    if (rows.length === 0) {
+      return res.status(404).json({ message: "Không tìm thấy đơn hàng" });
+    }
+    res.json({ id: rows[0].id, status: rows[0].status });
+  } catch (err) {
+    console.error("❌ getOrderStatus:", err);
+    res.status(500).json({ message: "Lỗi server khi lấy trạng thái đơn hàng" });
+  }
+};
+
+//
 // ✅ Tạo đơn hàng mới
 //
 export const createOrder = async (req, res) => {
@@ -28,19 +48,18 @@ export const createOrder = async (req, res) => {
     );
     const orderId = orderResult.insertId;
 
-    // 3️⃣ Xử lý từng item: lưu vào order_items, trừ tồn kho, cập nhật sản phẩm chính
+    // 3️⃣ Ghi các dòng chi tiết và trừ kho
     for (const item of items) {
       const { variant_id, quantity, price } = item;
-      if (!variant_id || !quantity) throw new Error(`Thiếu dữ liệu biến thể`);
+      if (!variant_id || !quantity)
+        throw new Error(`Thiếu dữ liệu biến thể cho đơn #${orderId}`);
 
-      // 🧾 Thêm dòng chi tiết
       await connection.query(
         `INSERT INTO order_items (order_id, variant_id, quantity, price)
          VALUES (?, ?, ?, ?)`,
         [orderId, variant_id, quantity, price],
       );
 
-      // 🔻 Trừ tồn kho
       const [updateResult] = await connection.query(
         `UPDATE product_variants
          SET stock = stock - ?
@@ -48,20 +67,17 @@ export const createOrder = async (req, res) => {
         [quantity, variant_id, quantity],
       );
 
-      if (updateResult.affectedRows === 0) {
-        throw new Error(`❌ Biến thể ID ${variant_id} không đủ hàng trong kho`);
-      }
+      if (updateResult.affectedRows === 0)
+        throw new Error(`❌ Biến thể ${variant_id} không đủ hàng trong kho`);
 
-      // 📦 Ghi log biến động kho
       await connection.query(
         `INSERT INTO stock_movements (variant_id, change_qty, reason, reference_id, created_at)
          VALUES (?, ?, 'order', ?, NOW())`,
         [variant_id, -quantity, orderId],
       );
 
-      // 🔁 Cập nhật tổng tồn kho sản phẩm chính
       await connection.query(
-        `UPDATE products 
+        `UPDATE products
          SET stock = (
            SELECT COALESCE(SUM(stock), 0)
            FROM product_variants
@@ -123,7 +139,6 @@ export const listOrders = async (_req, res) => {
       ORDER BY oi.order_id DESC
     `);
 
-    // Gắn sản phẩm vào từng đơn hàng
     const map = Object.fromEntries(
       orders.map((o) => [o.id, { ...o, items: [] }]),
     );
@@ -162,7 +177,6 @@ export const updateOrderStatus = async (req, res) => {
     }
 
     console.log(`🔄 Cập nhật đơn #${id} => ${status}`);
-
     res.json({
       message: `✅ Cập nhật trạng thái đơn hàng #${id} thành '${status}'`,
     });
