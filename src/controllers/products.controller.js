@@ -14,21 +14,21 @@ cloudinary.config({
 
 // ⚙️ Multer xử lý upload file tạm trong bộ nhớ
 const upload = multer({ storage: multer.memoryStorage() });
-
-// ✅ Middleware upload 1 ảnh (frontend gửi field name = "image")
 export const uploadImage = upload.single("image");
 
-// ✅ Tạo sản phẩm mới (có thể có ảnh)
+// ✅ Tạo sản phẩm mới (có thể có ảnh, brand và biến thể)
 export const createProduct = async (req, res) => {
+  const conn = await pool.getConnection();
   try {
-    const { sku, name, category, cost_price, sale_price } = req.body;
+    const { sku, name, category, brand, cost_price, sale_price, variants } =
+      req.body;
 
     if (!sku || !name)
       return res.status(400).json({ message: "Thiếu SKU hoặc tên sản phẩm" });
 
     let imageUrl = null;
 
-    // 🖼️ Nếu có file ảnh — upload lên Cloudinary
+    // 🖼️ Upload ảnh lên Cloudinary
     if (req.file) {
       imageUrl = await new Promise((resolve, reject) => {
         const stream = cloudinary.uploader.upload_stream(
@@ -48,54 +48,99 @@ export const createProduct = async (req, res) => {
       });
     }
 
+    await conn.beginTransaction();
+
     // 💾 Lưu sản phẩm vào DB
-    const [resultDB] = await pool.query(
-      `INSERT INTO products (sku, name, category, cost_price, sale_price, cover_image)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+    const [resultDB] = await conn.query(
+      `INSERT INTO products (sku, name, category, brand, cost_price, sale_price, cover_image)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
         sku.trim().toUpperCase(),
         name.trim(),
         category || null,
+        brand || null,
         cost_price || 0,
         sale_price || 0,
         imageUrl,
       ],
     );
 
+    const productId = resultDB.insertId;
+
+    // 🧩 Nếu có biến thể thì thêm vào bảng product_variants
+    if (variants && Array.isArray(JSON.parse(variants))) {
+      const variantList = JSON.parse(variants);
+      for (const v of variantList) {
+        await conn.query(
+          `INSERT INTO product_variants (product_id, size, color, stock)
+           VALUES (?, ?, ?, ?)`,
+          [productId, v.size || null, v.color || null, v.stock || 0],
+        );
+      }
+    }
+
+    await conn.commit();
+
     res.status(201).json({
-      id: resultDB.insertId,
-      message: "Tạo sản phẩm thành công",
+      id: productId,
+      message: "✅ Tạo sản phẩm thành công!",
       image_url: imageUrl,
     });
   } catch (err) {
+    await conn.rollback();
     console.error("❌ Lỗi createProduct:", err);
     if (err.code === "ER_DUP_ENTRY") {
       return res.status(409).json({ message: "SKU đã tồn tại" });
     }
     res.status(500).json({ message: err.message });
+  } finally {
+    conn.release();
   }
 };
 
-// ✅ Lấy danh sách sản phẩm
+// ✅ Lấy danh sách sản phẩm (cộng tồn kho tổng)
 export const listProducts = async (req, res) => {
   try {
     const { q } = req.query;
-    let sql = "SELECT * FROM products";
+    let sql = `
+      SELECT 
+        p.*, 
+        COALESCE(SUM(v.stock), 0) AS total_stock
+      FROM products p
+      LEFT JOIN product_variants v ON v.product_id = p.id
+    `;
     const params = [];
 
     if (q) {
-      sql += " WHERE name LIKE ? OR sku LIKE ?";
-      params.push(`%${q}%`, `%${q}%`);
+      sql += " WHERE p.name LIKE ? OR p.sku LIKE ? OR p.brand LIKE ?";
+      params.push(`%${q}%`, `%${q}%`, `%${q}%`);
     }
 
+    sql += " GROUP BY p.id ORDER BY p.id DESC";
     const [rows] = await pool.query(sql, params);
     res.json(rows);
   } catch (err) {
+    console.error("❌ listProducts error:", err);
     res.status(500).json({ message: err.message });
   }
 };
 
-// ✅ Tìm kiếm sản phẩm theo SKU
+// ✅ Lấy danh sách biến thể theo sản phẩm
+export const getVariantsByProduct = async (req, res) => {
+  try {
+    const { product_id } = req.params;
+    const [rows] = await pool.query(
+      "SELECT * FROM product_variants WHERE product_id = ? ORDER BY id DESC",
+      [product_id],
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error("❌ getVariantsByProduct error:", err);
+    res.status(500).json({ message: err.message });
+  }
+};
+
+// ✅ Tìm sản phẩm theo SKU
 export const findByCode = async (req, res) => {
   try {
     const code = (req.query.code || "").trim().toUpperCase();
