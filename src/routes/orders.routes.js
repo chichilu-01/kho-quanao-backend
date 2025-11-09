@@ -1,12 +1,14 @@
 import express from "express";
-import { createOrder, listOrders } from "../controllers/orders.controller.js";
+import {
+  createOrder,
+  listOrders,
+  updateOrderStatus,
+} from "../controllers/orders.controller.js";
 
 const router = express.Router();
 
-// Tạo đơn hàng
 router.post("/", createOrder);
-
-// Lấy danh sách đơn hàng kèm ảnh sản phẩm
 router.get("/", listOrders);
+router.put("/:id/status", updateOrderStatus);
 
 export default router;

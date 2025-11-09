@@ -20,8 +20,16 @@ export const uploadImage = upload.single("image");
 export const createProduct = async (req, res) => {
   const conn = await pool.getConnection();
   try {
-    const { sku, name, category, brand, cost_price, sale_price, variants } =
-      req.body;
+    const {
+      sku,
+      name,
+      category,
+      brand,
+      cost_price,
+      sale_price,
+      stock = 0, // ✅ Thêm tồn kho mặc định (frontend gửi)
+      variants,
+    } = req.body;
 
     if (!sku || !name)
       return res.status(400).json({ message: "Thiếu SKU hoặc tên sản phẩm" });
@@ -50,10 +58,10 @@ export const createProduct = async (req, res) => {
 
     await conn.beginTransaction();
 
-    // 💾 Lưu sản phẩm vào DB
+    // 💾 Lưu sản phẩm vào DB (tồn kho nhập trực tiếp)
     const [resultDB] = await conn.query(
-      `INSERT INTO products (sku, name, category, brand, cost_price, sale_price, cover_image)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO products (sku, name, category, brand, cost_price, sale_price, stock, cover_image)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         sku.trim().toUpperCase(),
         name.trim(),
@@ -61,6 +69,7 @@ export const createProduct = async (req, res) => {
         brand || null,
         cost_price || 0,
         sale_price || 0,
+        stock || 0,
         imageUrl,
       ],
     );
@@ -77,6 +86,16 @@ export const createProduct = async (req, res) => {
           [productId, v.size || null, v.color || null, v.stock || 0],
         );
       }
+
+      // ✅ Sau khi thêm variant, cập nhật tổng tồn kho
+      await conn.query(
+        `UPDATE products SET stock = (
+          SELECT COALESCE(SUM(stock), 0)
+          FROM product_variants
+          WHERE product_id = ?
+        ) WHERE id = ?`,
+        [productId, productId],
+      );
     }
 
     await conn.commit();
@@ -98,7 +117,7 @@ export const createProduct = async (req, res) => {
   }
 };
 
-// ✅ Lấy danh sách sản phẩm (kèm tổng tồn kho từ các biến thể)
+// ✅ Lấy danh sách sản phẩm (hiển thị đúng tồn kho)
 export const listProducts = async (req, res) => {
   try {
     const { q } = req.query;
@@ -107,7 +126,10 @@ export const listProducts = async (req, res) => {
       SELECT 
         p.id, p.sku, p.name, p.category, p.brand, 
         p.cost_price, p.sale_price, p.cover_image,
-        COALESCE(SUM(v.stock), 0) AS stock
+        CASE 
+          WHEN COUNT(v.id) > 0 THEN COALESCE(SUM(v.stock), 0)
+          ELSE p.stock
+        END AS stock
       FROM products p
       LEFT JOIN product_variants v ON v.product_id = p.id
     `;
