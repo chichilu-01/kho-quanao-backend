@@ -36,17 +36,38 @@ export const importStock = async (req, res) => {
     return res.status(400).json({ message: "Thiếu variant_id hoặc quantity" });
 
   try {
-    // tăng stock
-    await pool.query(
-      `UPDATE product_variants SET stock = stock + ? WHERE id = ?`,
-      [quantity, variant_id],
+    // Kiểm tra xem variant_id này có tồn tại trong product_variants không
+    const [checkVar] = await pool.query(
+      `SELECT * FROM product_variants WHERE id = ?`,
+      [variant_id],
     );
 
-    // ghi lịch sử
-    await recordMovement(variant_id, quantity, "import");
+    if (checkVar.length) {
+      // ✅ Trường hợp có biến thể
+      await pool.query(
+        `UPDATE product_variants SET stock = stock + ? WHERE id = ?`,
+        [quantity, variant_id],
+      );
 
-    // cập nhật tổng stock sản phẩm cha
-    await updateProductStock(variant_id);
+      // Ghi lịch sử
+      await recordMovement(variant_id, quantity, "import");
+
+      // Cập nhật tổng stock sản phẩm cha
+      await updateProductStock(variant_id);
+    } else {
+      // ✅ Trường hợp không có biến thể (nhập trực tiếp sản phẩm)
+      await pool.query(`UPDATE products SET stock = stock + ? WHERE id = ?`, [
+        quantity,
+        variant_id,
+      ]);
+
+      // Ghi lịch sử (không có variant)
+      await pool.query(
+        `INSERT INTO stock_movements (variant_id, change_qty, reason)
+         VALUES (NULL, ?, 'import')`,
+        [quantity],
+      );
+    }
 
     res.json({ message: `✅ Đã nhập thêm ${quantity} sản phẩm vào kho` });
   } catch (err) {
