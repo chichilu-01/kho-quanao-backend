@@ -8,6 +8,7 @@ import {
 } from "../controllers/orders.controller.js";
 
 const router = express.Router();
+console.log("✅ Orders routes loaded");
 
 router.post("/", createOrder);
 router.get("/", listOrders);
