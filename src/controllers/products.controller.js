@@ -16,7 +16,9 @@ cloudinary.config({
 const upload = multer({ storage: multer.memoryStorage() });
 export const uploadImage = upload.single("image");
 
+//
 // ✅ Tạo sản phẩm mới
+//
 export const createProduct = async (req, res) => {
   const conn = await pool.getConnection();
   try {
@@ -29,6 +31,7 @@ export const createProduct = async (req, res) => {
       sale_price,
       stock = 0,
     } = req.body;
+
     if (!sku || !name)
       return res.status(400).json({ message: "Thiếu SKU hoặc tên sản phẩm" });
 
@@ -77,7 +80,9 @@ export const createProduct = async (req, res) => {
   }
 };
 
-// ✅ Danh sách sản phẩm
+//
+// ✅ Lấy danh sách sản phẩm (có tìm kiếm)
+//
 export const listProducts = async (req, res) => {
   try {
     const { q } = req.query;
@@ -100,7 +105,9 @@ export const listProducts = async (req, res) => {
   }
 };
 
+//
 // ✅ Tìm sản phẩm theo mã SKU hoặc tên
+//
 export const findByCode = async (req, res) => {
   try {
     const { code } = req.query;
@@ -118,7 +125,9 @@ export const findByCode = async (req, res) => {
   }
 };
 
+//
 // ✅ Cập nhật sản phẩm
+//
 export const updateProduct = async (req, res) => {
   try {
     const { id } = req.params;
@@ -168,27 +177,70 @@ export const updateProduct = async (req, res) => {
   }
 };
 
-// ✅ Lấy danh sách biến thể của sản phẩm
+//
+// ✅ Lấy danh sách biến thể của sản phẩm (đồng bộ tồn kho tổng)
+//
 export const getVariantsByProduct = async (req, res) => {
   try {
     const { product_id } = req.params;
-    const [rows] = await pool.query(
-      "SELECT * FROM product_variants WHERE product_id = ? ORDER BY id ASC",
+
+    const [variants] = await pool.query(
+      `SELECT id, product_id, size, color, variant_sku, base_sku, stock
+       FROM product_variants 
+       WHERE product_id = ? 
+       ORDER BY id ASC`,
       [product_id],
     );
-    res.json(rows);
+
+    // 🔁 Tự động cập nhật tổng tồn kho sản phẩm chính
+    await pool.query(
+      `UPDATE products 
+       SET stock = (SELECT COALESCE(SUM(stock), 0) FROM product_variants WHERE product_id = ?)
+       WHERE id = ?`,
+      [product_id, product_id],
+    );
+
+    res.json(variants);
   } catch (err) {
     console.error("❌ Lỗi getVariantsByProduct:", err);
     res.status(500).json({ message: err.message });
   }
 };
 
-// ✅ Xóa sản phẩm
+//
+// ✅ Lấy sản phẩm + tất cả biến thể (full detail)
+//
+export const getProductWithVariants = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const [[product]] = await pool.query(
+      "SELECT * FROM products WHERE id = ?",
+      [id],
+    );
+    if (!product)
+      return res.status(404).json({ message: "Không tìm thấy sản phẩm" });
+
+    const [variants] = await pool.query(
+      "SELECT * FROM product_variants WHERE product_id = ? ORDER BY id ASC",
+      [id],
+    );
+
+    res.json({ ...product, variants });
+  } catch (err) {
+    console.error("❌ getProductWithVariants:", err);
+    res.status(500).json({ message: err.message });
+  }
+};
+
+//
+// ✅ Xóa sản phẩm (xóa cả ảnh và biến thể liên quan)
+//
 export const deleteProduct = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Lấy thông tin ảnh để xoá trên Cloudinary
+    // 🖼️ Lấy thông tin ảnh để xoá trên Cloudinary
     const [rows] = await pool.query(
       "SELECT cover_image FROM products WHERE id = ?",
       [id],
@@ -199,7 +251,6 @@ export const deleteProduct = async (req, res) => {
     const imageUrl = rows[0].cover_image;
     if (imageUrl) {
       try {
-        // 🔥 Lấy public_id từ URL Cloudinary
         const parts = imageUrl.split("/");
         const filename = parts[parts.length - 1];
         const publicId = "kho_quanao/" + filename.split(".")[0];
@@ -209,11 +260,13 @@ export const deleteProduct = async (req, res) => {
       }
     }
 
-    // Xóa luôn các biến thể và bản ghi chính
+    // 🧹 Xóa luôn các biến thể và bản ghi chính
     await pool.query("DELETE FROM product_variants WHERE product_id = ?", [id]);
     await pool.query("DELETE FROM products WHERE id = ?", [id]);
 
-    res.json({ message: "🗑️ Đã xóa sản phẩm thành công!" });
+    res.json({
+      message: "🗑️ Đã xóa sản phẩm và biến thể liên quan thành công!",
+    });
   } catch (err) {
     console.error("❌ deleteProduct:", err);
     res.status(500).json({ message: err.message });

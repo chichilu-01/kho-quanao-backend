@@ -2,6 +2,7 @@
 import express from "express";
 import {
   createVariant,
+  createVariantsBulk, // 🟢 thêm dòng này
   listVariantsByProduct,
   updateVariant,
   deleteVariant,
@@ -10,6 +11,9 @@ import {
 } from "../controllers/variants.controller.js";
 
 const router = express.Router();
+
+// ➕ Tạo nhiều biến thể cùng lúc
+router.post("/bulk", createVariantsBulk);
 
 // ➕ Tạo biến thể
 router.post("/", createVariant);
