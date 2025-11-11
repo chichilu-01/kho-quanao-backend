@@ -156,17 +156,33 @@ export const listOrders = async (_req, res) => {
 //
 // ✅ Cập nhật trạng thái đơn hàng
 //
+//
+// ✅ Cập nhật trạng thái đơn hàng (đầy đủ 5 trạng thái ENUM)
+//
 export const updateOrderStatus = async (req, res) => {
   const connection = await pool.getConnection();
   try {
     const { id } = req.params;
     const { status } = req.body;
 
-    const validStatuses = ["pending", "shipped", "completed", "cancelled"];
+    // ⚙️ Danh sách hợp lệ (khớp ENUM trong MySQL)
+    const validStatuses = [
+      "pending",
+      "confirmed",
+      "shipped",
+      "completed",
+      "cancelled",
+    ];
+
     if (!validStatuses.includes(status)) {
-      return res.status(400).json({ message: "Trạng thái không hợp lệ" });
+      return res.status(400).json({
+        message: `Trạng thái không hợp lệ: ${status}. Hợp lệ gồm: ${validStatuses.join(
+          ", ",
+        )}`,
+      });
     }
 
+    // ⚙️ Cập nhật trạng thái
     const [result] = await connection.query(
       "UPDATE orders SET status = ?, updated_at = NOW() WHERE id = ?",
       [status, id],
@@ -176,9 +192,9 @@ export const updateOrderStatus = async (req, res) => {
       return res.status(404).json({ message: "Không tìm thấy đơn hàng" });
     }
 
-    console.log(`🔄 Cập nhật đơn #${id} => ${status}`);
+    console.log(`🔄 Đơn hàng #${id} => ${status}`);
     res.json({
-      message: `✅ Cập nhật trạng thái đơn hàng #${id} thành '${status}'`,
+      message: `✅ Cập nhật trạng thái đơn hàng #${id} thành công (${status})`,
     });
   } catch (err) {
     console.error("❌ updateOrderStatus:", err);
