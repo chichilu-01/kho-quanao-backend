@@ -9,6 +9,7 @@ import variantsRouter from "./routes/variants.routes.js";
 import stockRouter from "./routes/stock.routes.js";
 import customersRouter from "./routes/customers.routes.js";
 import ordersRouter from "./routes/orders.routes.js";
+import optionsRoutes from "./routes/options.routes.js";
 
 dotenv.config();
 const app = express();
@@ -42,7 +43,7 @@ app.use("/api/variants", variantsRouter);
 app.use("/api/stock", stockRouter);
 app.use("/api/customers", customersRouter);
 app.use("/api/orders", ordersRouter);
-
+app.use("/api/options", optionsRoutes);
 // ✅ Route mặc định
 app.get("/", (req, res) => {
   res.send("Server running! Try /api/health or /api/orders");
