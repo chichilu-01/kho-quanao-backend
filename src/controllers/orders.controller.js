@@ -8,7 +8,7 @@ export const getOrderStatus = async (req, res) => {
     const { id } = req.params;
     const [rows] = await pool.query(
       "SELECT id, status FROM orders WHERE id = ?",
-      [id]
+      [id],
     );
     if (rows.length === 0) {
       return res.status(404).json({ message: "Không tìm thấy đơn hàng" });
@@ -16,19 +16,18 @@ export const getOrderStatus = async (req, res) => {
     res.json(rows[0]);
   } catch (err) {
     console.error("❌ getOrderStatus:", err);
-    res
-      .status(500)
-      .json({ message: "Lỗi server khi lấy trạng thái đơn hàng" });
+    res.status(500).json({ message: "Lỗi server khi lấy trạng thái đơn hàng" });
   }
 };
 
 //
-// ✅ Tạo đơn hàng mới
+// ✅ Tạo đơn hàng mới (Đã thêm: china_tracking_code)
 //
 export const createOrder = async (req, res) => {
   const connection = await pool.getConnection();
   try {
-    const { customer_id, note, items } = req.body;
+    // 👇 Thêm tracking_code vào body nhận
+    const { customer_id, note, items, china_tracking_code } = req.body;
 
     if (!customer_id || !Array.isArray(items) || items.length === 0) {
       return res
@@ -41,11 +40,17 @@ export const createOrder = async (req, res) => {
     // 1️⃣ Tính tổng tiền
     const subtotal = items.reduce((sum, i) => sum + i.price * i.quantity, 0);
 
-    // 2️⃣ Tạo đơn hàng
+    // 2️⃣ Tạo đơn hàng (Đã sửa SQL để lưu tracking code)
     const [orderResult] = await connection.query(
-      `INSERT INTO orders (customer_id, subtotal, total, note, status, created_at)
-       VALUES (?, ?, ?, ?, 'pending', NOW())`,
-      [customer_id, subtotal, subtotal, note || null]
+      `INSERT INTO orders (customer_id, subtotal, total, note, china_tracking_code, status, created_at)
+       VALUES (?, ?, ?, ?, ?, 'pending', NOW())`,
+      [
+        customer_id,
+        subtotal,
+        subtotal,
+        note || null,
+        china_tracking_code || null,
+      ],
     );
     const orderId = orderResult.insertId;
 
@@ -55,19 +60,16 @@ export const createOrder = async (req, res) => {
       if (!variant_id || !quantity)
         throw new Error(`Thiếu dữ liệu biến thể cho đơn #${orderId}`);
 
-      // Ghi vào order_items
       await connection.query(
         `INSERT INTO order_items (order_id, variant_id, quantity, price)
          VALUES (?, ?, ?, ?)`,
-        [orderId, variant_id, quantity, price]
+        [orderId, variant_id, quantity, price],
       );
 
       // Trừ kho
       const [updateResult] = await connection.query(
-        `UPDATE product_variants
-         SET stock = stock - ?
-         WHERE id = ? AND stock >= ?`,
-        [quantity, variant_id, quantity]
+        `UPDATE product_variants SET stock = stock - ? WHERE id = ? AND stock >= ?`,
+        [quantity, variant_id, quantity],
       );
       if (updateResult.affectedRows === 0)
         throw new Error(`❌ Biến thể ${variant_id} không đủ hàng trong kho`);
@@ -76,28 +78,17 @@ export const createOrder = async (req, res) => {
       await connection.query(
         `INSERT INTO stock_movements (variant_id, change_qty, reason, reference_id, created_at)
          VALUES (?, ?, 'order', ?, NOW())`,
-        [variant_id, -quantity, orderId]
+        [variant_id, -quantity, orderId],
       );
 
-      // Cập nhật tổng stock của sản phẩm cha
+      // Update parent product stock... (Giữ nguyên logic của bạn)
       await connection.query(
-        `UPDATE products
-         SET stock = (
-           SELECT COALESCE(SUM(stock), 0)
-           FROM product_variants
-           WHERE product_id = (
-             SELECT product_id FROM product_variants WHERE id = ?
-           )
-         )
-         WHERE id = (
-           SELECT product_id FROM product_variants WHERE id = ?
-         )`,
-        [variant_id, variant_id]
+        `UPDATE products SET stock = (SELECT COALESCE(SUM(stock), 0) FROM product_variants WHERE product_id = (SELECT product_id FROM product_variants WHERE id = ?)) WHERE id = (SELECT product_id FROM product_variants WHERE id = ?)`,
+        [variant_id, variant_id],
       );
     }
 
     await connection.commit();
-    console.log(`✅ Đơn hàng #${orderId} tạo thành công`);
     res.status(201).json({
       id: orderId,
       message: "✅ Tạo đơn hàng thành công!",
@@ -115,18 +106,45 @@ export const createOrder = async (req, res) => {
 };
 
 //
-// ✅ Lấy danh sách đơn hàng (kèm khách hàng + sản phẩm)
+// 🔍 Lấy danh sách đơn hàng (Nâng cấp: Hỗ trợ tìm kiếm Search)
 //
-export const listOrders = async (_req, res) => {
+export const listOrders = async (req, res) => {
   try {
-    const [orders] = await pool.query(`
+    const { q } = req.query; // Nhận từ khóa tìm kiếm từ URL (?q=...)
+
+    // Câu query cơ bản
+    let sqlOrders = `
       SELECT o.*, c.name AS customer_name, c.phone, c.address
       FROM orders o
       JOIN customers c ON o.customer_id = c.id
-      ORDER BY o.id DESC
-    `);
+    `;
 
-    const [items] = await pool.query(`
+    const params = [];
+
+    // 👇 Logic tìm kiếm thông minh: Tìm theo ID đơn, SĐT, Tên khách hoặc Mã Vận Đơn
+    if (q) {
+      sqlOrders += `
+        WHERE o.id LIKE ? 
+        OR c.phone LIKE ? 
+        OR c.name LIKE ? 
+        OR o.china_tracking_code LIKE ?
+      `;
+      const keyword = `%${q}%`;
+      params.push(keyword, keyword, keyword, keyword);
+    }
+
+    sqlOrders += ` ORDER BY o.id DESC`;
+
+    const [orders] = await pool.query(sqlOrders, params);
+
+    // Nếu không có đơn nào thì trả về mảng rỗng luôn
+    if (orders.length === 0) return res.json([]);
+
+    // Lấy danh sách items cho các đơn hàng tìm được
+    // (Chỉ lấy items của các orderID vừa tìm thấy để tối ưu)
+    const orderIds = orders.map((o) => o.id);
+    const [items] = await pool.query(
+      `
       SELECT 
         oi.order_id, oi.quantity, oi.price,
         pv.size, pv.color,
@@ -134,11 +152,15 @@ export const listOrders = async (_req, res) => {
       FROM order_items oi
       JOIN product_variants pv ON oi.variant_id = pv.id
       JOIN products p ON pv.product_id = p.id
+      WHERE oi.order_id IN (?)
       ORDER BY oi.order_id DESC
-    `);
+    `,
+      [orderIds],
+    );
 
+    // Map items vào order
     const map = Object.fromEntries(
-      orders.map((o) => [o.id, { ...o, items: [] }])
+      orders.map((o) => [o.id, { ...o, items: [] }]),
     );
     for (const it of items) {
       if (map[it.order_id]) map[it.order_id].items.push(it);
@@ -147,9 +169,7 @@ export const listOrders = async (_req, res) => {
     res.json(Object.values(map));
   } catch (err) {
     console.error("❌ listOrders:", err);
-    res
-      .status(500)
-      .json({ message: "Lỗi server khi lấy danh sách đơn hàng" });
+    res.status(500).json({ message: "Lỗi server khi lấy danh sách đơn hàng" });
   }
 };
 
@@ -157,12 +177,11 @@ export const listOrders = async (_req, res) => {
 // ✅ Cập nhật trạng thái đơn hàng
 //
 export const updateOrderStatus = async (req, res) => {
+  // ... (Giữ nguyên code của bạn) ...
   const connection = await pool.getConnection();
   try {
     const { id } = req.params;
     const { status } = req.body;
-
-    // ✅ Các trạng thái hợp lệ đúng ENUM MySQL
     const validStatuses = [
       "pending",
       "confirmed",
@@ -172,29 +191,50 @@ export const updateOrderStatus = async (req, res) => {
     ];
 
     if (!validStatuses.includes(status)) {
-      return res.status(400).json({
-        message: `Trạng thái không hợp lệ: ${status}. Hợp lệ gồm: ${validStatuses.join(
-          ", "
-        )}`,
-      });
+      return res.status(400).json({ message: "Trạng thái không hợp lệ" });
     }
 
     const [result] = await connection.query(
       "UPDATE orders SET status = ?, updated_at = NOW() WHERE id = ?",
-      [status, id]
+      [status, id],
     );
 
     if (result.affectedRows === 0)
       return res.status(404).json({ message: "Không tìm thấy đơn hàng" });
 
-    console.log(`🔄 Đơn hàng #${id} => ${status}`);
-    res.json({
-      message: `✅ Cập nhật trạng thái đơn hàng #${id} thành công (${status})`,
-    });
+    res.json({ message: `✅ Cập nhật trạng thái đơn #${id} thành công` });
   } catch (err) {
     console.error("❌ updateOrderStatus:", err);
-    res.status(500).json({ message: "Lỗi server khi cập nhật trạng thái" });
+    res.status(500).json({ message: "Lỗi server" });
   } finally {
     connection.release();
+  }
+};
+
+//
+// 🆕 [MỚI] Cập nhật Mã Vận Đơn Trung Quốc
+// API này dùng cho ô Input bạn mới thêm ở giao diện chi tiết
+//
+export const updateTrackingCode = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { china_tracking_code } = req.body; // Nhận mã từ Client
+
+    const [result] = await pool.query(
+      "UPDATE orders SET china_tracking_code = ? WHERE id = ?",
+      [china_tracking_code, id],
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: "Không tìm thấy đơn hàng" });
+    }
+
+    res.json({
+      message: "✅ Đã lưu mã vận đơn thành công",
+      china_tracking_code,
+    });
+  } catch (err) {
+    console.error("❌ updateTrackingCode:", err);
+    res.status(500).json({ message: "Lỗi server khi lưu mã vận đơn" });
   }
 };
