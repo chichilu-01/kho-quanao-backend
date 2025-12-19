@@ -238,3 +238,52 @@ export const updateTrackingCode = async (req, res) => {
     res.status(500).json({ message: "Lỗi server khi lưu mã vận đơn" });
   }
 };
+
+//
+// 🆕 [MỚI] Lấy chi tiết đơn hàng (Dùng cho trang Order Detail)
+//
+export const getOrderDetail = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // 1️⃣ Lấy thông tin đơn hàng + JOIN với bảng customers để lấy SĐT, Địa chỉ
+    const [orders] = await pool.query(
+      `SELECT 
+        o.*,
+        c.name AS customer_name,
+        c.phone AS customer_phone,      -- Lấy SĐT
+        c.address AS customer_address   -- Lấy Địa chỉ
+      FROM orders o
+      LEFT JOIN customers c ON o.customer_id = c.id
+      WHERE o.id = ?`,
+      [id],
+    );
+
+    if (orders.length === 0) {
+      return res.status(404).json({ message: "Không tìm thấy đơn hàng" });
+    }
+
+    const order = orders[0];
+
+    // 2️⃣ Lấy danh sách sản phẩm (Items)
+    const [items] = await pool.query(
+      `SELECT 
+        oi.*,
+        p.name AS product_name,
+        p.cover_image,
+        v.size,
+        v.color
+      FROM order_items oi
+      JOIN variants v ON oi.variant_id = v.id
+      JOIN products p ON v.product_id = p.id
+      WHERE oi.order_id = ?`,
+      [id],
+    );
+
+    // 3️⃣ Trả về dữ liệu gộp
+    res.json({ ...order, items });
+  } catch (error) {
+    console.error("Lỗi lấy chi tiết đơn hàng:", error);
+    res.status(500).json({ message: "Lỗi server", error: error.message });
+  }
+};

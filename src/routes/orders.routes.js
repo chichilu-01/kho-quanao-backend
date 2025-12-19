@@ -1,28 +1,30 @@
-// routes/orders.routes.js
 import express from "express";
 import {
   createOrder,
   listOrders,
+  getOrderDetail, // 👈 1. Thêm cái này
   updateOrderStatus,
   getOrderStatus,
-  updateTrackingCode, // 🆕 1. Nhớ import hàm này vào
+  updateTrackingCode,
 } from "../controllers/orders.controller.js";
 
 const router = express.Router();
 console.log("✅ Orders routes loaded");
 
-// Tạo đơn và Lấy danh sách (đã hỗ trợ tìm kiếm ?q=...)
+// Tạo đơn và Lấy danh sách
 router.post("/", createOrder);
 router.get("/", listOrders);
 
-// Lấy trạng thái đơn (Test)
+// 🆕 2. [QUAN TRỌNG] Route lấy chi tiết đơn hàng (Cần cái này để hiện SĐT, Địa chỉ)
+router.get("/:id", getOrderDetail);
+
+// Lấy trạng thái đơn
 router.get("/:id/status", getOrderStatus);
 
-// Cập nhật trạng thái (Pending -> Shipping -> Completed)
+// Cập nhật trạng thái
 router.put("/:id/status", updateOrderStatus);
 
-// 🆕 2. [MỚI] API để lưu Mã Vận Đơn từ giao diện chi tiết
-// Frontend sẽ gọi: axios.put(`/api/orders/${id}/tracking`, { china_tracking_code: "..." })
+// Cập nhật mã vận đơn
 router.put("/:id/tracking", updateTrackingCode);
 
 export default router;
