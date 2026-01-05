@@ -21,13 +21,13 @@ export const getOrderStatus = async (req, res) => {
 };
 
 //
-// ✅ Tạo đơn hàng mới (Đã thêm: china_tracking_code)
+// ✅ Tạo đơn hàng mới (Đã thêm: china_tracking_code & deposit)
 //
 export const createOrder = async (req, res) => {
   const connection = await pool.getConnection();
   try {
-    // 👇 Thêm tracking_code vào body nhận
-    const { customer_id, note, items, china_tracking_code } = req.body;
+    // 👇 Thêm tracking_code và deposit vào body nhận
+    const { customer_id, note, items, china_tracking_code, deposit } = req.body;
 
     if (!customer_id || !Array.isArray(items) || items.length === 0) {
       return res
@@ -40,14 +40,18 @@ export const createOrder = async (req, res) => {
     // 1️⃣ Tính tổng tiền
     const subtotal = items.reduce((sum, i) => sum + i.price * i.quantity, 0);
 
-    // 2️⃣ Tạo đơn hàng (Đã sửa SQL để lưu tracking code)
+    // Xử lý tiền cọc (đảm bảo là số)
+    const finalDeposit = Number(deposit) || 0;
+
+    // 2️⃣ Tạo đơn hàng (Đã sửa SQL để lưu tracking code và deposit)
     const [orderResult] = await connection.query(
-      `INSERT INTO orders (customer_id, subtotal, total, note, china_tracking_code, status, created_at)
-       VALUES (?, ?, ?, ?, ?, 'pending', NOW())`,
+      `INSERT INTO orders (customer_id, subtotal, total, deposit, note, china_tracking_code, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'pending', NOW())`,
       [
         customer_id,
         subtotal,
         subtotal,
+        finalDeposit, // 👈 Lưu tiền cọc vào DB
         note || null,
         china_tracking_code || null,
       ],
@@ -81,7 +85,7 @@ export const createOrder = async (req, res) => {
         [variant_id, -quantity, orderId],
       );
 
-      // Update parent product stock... (Giữ nguyên logic của bạn)
+      // Update parent product stock...
       await connection.query(
         `UPDATE products SET stock = (SELECT COALESCE(SUM(stock), 0) FROM product_variants WHERE product_id = (SELECT product_id FROM product_variants WHERE id = ?)) WHERE id = (SELECT product_id FROM product_variants WHERE id = ?)`,
         [variant_id, variant_id],
@@ -93,6 +97,7 @@ export const createOrder = async (req, res) => {
       id: orderId,
       message: "✅ Tạo đơn hàng thành công!",
       total: subtotal,
+      deposit: finalDeposit,
     });
   } catch (err) {
     await connection.rollback();
@@ -141,7 +146,6 @@ export const listOrders = async (req, res) => {
     if (orders.length === 0) return res.json([]);
 
     // Lấy danh sách items cho các đơn hàng tìm được
-    // (Chỉ lấy items của các orderID vừa tìm thấy để tối ưu)
     const orderIds = orders.map((o) => o.id);
     const [items] = await pool.query(
       `
@@ -177,7 +181,6 @@ export const listOrders = async (req, res) => {
 // ✅ Cập nhật trạng thái đơn hàng
 //
 export const updateOrderStatus = async (req, res) => {
-  // ... (Giữ nguyên code của bạn) ...
   const connection = await pool.getConnection();
   try {
     const { id } = req.params;
@@ -213,7 +216,6 @@ export const updateOrderStatus = async (req, res) => {
 
 //
 // 🆕 [MỚI] Cập nhật Mã Vận Đơn Trung Quốc
-// API này dùng cho ô Input bạn mới thêm ở giao diện chi tiết
 //
 export const updateTrackingCode = async (req, res) => {
   try {
@@ -239,9 +241,6 @@ export const updateTrackingCode = async (req, res) => {
   }
 };
 
-//
-// 🆕 [MỚI] Lấy chi tiết đơn hàng (Dùng cho trang Order Detail)
-//
 //
 // 🆕 [ĐÃ SỬA LỖI] Lấy chi tiết đơn hàng
 //
