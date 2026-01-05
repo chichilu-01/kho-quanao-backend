@@ -242,6 +242,9 @@ export const updateTrackingCode = async (req, res) => {
 //
 // 🆕 [MỚI] Lấy chi tiết đơn hàng (Dùng cho trang Order Detail)
 //
+//
+// 🆕 [ĐÃ SỬA LỖI] Lấy chi tiết đơn hàng
+//
 export const getOrderDetail = async (req, res) => {
   try {
     const { id } = req.params;
@@ -266,6 +269,7 @@ export const getOrderDetail = async (req, res) => {
     const order = orders[0];
 
     // 2️⃣ Lấy danh sách sản phẩm (Items)
+    // 🚩 ĐÃ SỬA: Đổi 'JOIN variants' thành 'JOIN product_variants'
     const [items] = await pool.query(
       `SELECT 
         oi.*,
@@ -274,7 +278,7 @@ export const getOrderDetail = async (req, res) => {
         v.size,
         v.color
       FROM order_items oi
-      JOIN variants v ON oi.variant_id = v.id
+      JOIN product_variants v ON oi.variant_id = v.id 
       JOIN products p ON v.product_id = p.id
       WHERE oi.order_id = ?`,
       [id],
